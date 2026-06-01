@@ -186,23 +186,65 @@ class Stage2(metaclass=LogBase):
         else:
             return buffer[start % 0x200:(start % 0x200) + length]
 
-    def userdata(self, start=0, length=32 * 0x200, filename="data.bin"):
+    def writeflash(self, type_: int, start, length, filename: str, display=False):
+        if not self.emmc_inited:
+            self.init_emmc()
+        pg = progress(pagesize=0x200, total=length)
+        rf = open(filename, "rb")
+        sectors = (length // 0x200)
+        sectors += (1 if length % 0x200 else 0)
+        startsector = (start // 0x200)
+        # emmc_switch(1)
+        self.usbwrite(pack(">I", 0xf00dd00d))
+        self.usbwrite(pack(">I", 0x1002))
+        self.usbwrite(pack(">I", type_))
+
+        # kick-wdt
+        # self.usbwrite(pack(">I", 0xf00dd00d))
+        # self.usbwrite(pack(">I", 0x3001))
+
+        bytestowrite = length
+        byteswrote = 0
+        old = 0
+        # emmc_read(0)
+        self.usbwrite(pack(">I", 0xf00dd00d))
+        self.usbwrite(pack(">I", 0x1001))
+        self.usbwrite(pack(">I", startsector))
+        self.usbwrite(pack(">I", sectors))
+        for sector in range(sectors):
+            data = rf.read(512)
+            res = self.usbwrite(data)
+            if not res:
+                self.error("Error on writing data")
+                return
+            if display:
+                pg.update(512)
+            byteswrote += 512
+            bytestowrite -= 512
+        if display:
+            pg.done()
+        rf.close()
+
+    def userdata(self, start=0, length=32 * 0x200, filename="data.bin", iswrite=False):
         sectors = 0
         if length != 0:
             sectors = (length // 0x200) + (1 if length % 0x200 else 0)
         self.info("Reading user data...")
         if self.cdc.connected:
-            self.readflash(type_=0, start=start, length=length, display=True, filename=filename)
+            if iswrite:
+                self.writeflash(type_=0, start=start, length=length, filename=filename, display=True)
+            else:
+                self.readflash(type_=0, start=start, length=length, filename=filename, display=True)
 
-    def preloader(self, start, length, filename):
+    def preloader(self, start, length, filename, iswrite=False):
         sectors = 0
         if start != 0:
-            start = (start // 0x200)
+            start_sector = (start // 0x200)
         if length != 0:
             sectors = (length // 0x200) + (1 if length % 0x200 else 0)
         self.info("Reading preloader...")
         if self.cdc.connected:
-            if sectors == 0:
+            if length == 0:
                 buffer = self.readflash(type_=1, start=0, length=0x4000, display=False)
                 if len(buffer) != 0x4000:
                     print("Error on reading boot1 area.")
@@ -234,23 +276,32 @@ class Stage2(metaclass=LogBase):
                     print("Done")
                 print("Error on getting preloader info, aborting.")
             else:
-                self.readflash(type_=1, start=start, length=length, display=True, filename=filename)
-            print("Done")
+                if iswrite:
+                    self.writeflash(type_=1, start=start, length=length, display=True, filename=filename)
+                else:
+                    self.readflash(type_=1, start=start, length=length, display=True, filename=filename)
+                    print("Done")
 
-    def boot2(self, start, length, filename):
+    def boot2(self, start, length, filename, iswrite=False):
         sectors = 0
         if start != 0:
-            start = (start // 0x200)
+            start_sector = (start // 0x200)
         if length != 0:
             sectors = (length // 0x200) + (1 if length % 0x200 else 0)
         self.info("Reading boot2...")
         if self.cdc.connected:
-            if sectors == 0:
-                self.readflash(type_=2, start=0, length=0x40000, display=True, filename=filename)
+            if iswrite:
+                self.writeflash(
+                    type_=2, start=start, length=length, filename=filename, display=True
+                )
                 print("Done")
             else:
-                self.readflash(type_=1, start=start, length=length, display=True, filename=filename)
-            print("Done")
+                if length == 0:
+                    self.readflash(type_=2, start=0, length=0x40000, display=True, filename=filename)
+                    print("Done")
+                else:
+                    self.readflash(type_=2, start=start, length=length, display=True, filename=filename)
+                    print("Done")
 
     def memread(self, start, length, filename=None):
         bytestoread = length
@@ -555,6 +606,8 @@ def main():
                                   help='Max length to dump')
     parser_preloader.add_argument('--filename', dest='filename', type=str,
                                   help='Read from / save to filename')
+    parser_preloader.add_argument('--write', dest='iswrite', action='store_true',
+                              help='Write from filename instead of read')
 
     parser_data = subparsers.add_parser("data", help="Read the mmc")
     parser_data.add_argument('--start', dest='start', type=str,
@@ -563,6 +616,8 @@ def main():
                              help='Max length to dump')
     parser_data.add_argument('--filename', dest='filename', type=str,
                              help='Read from / save to filename')
+    parser_data.add_argument('--write', dest='iswrite', action='store_true',
+                              help='Write from filename instead of read')
 
     parser_boot2 = subparsers.add_parser("boot2", help="Dump boot2")
     parser_boot2.add_argument('--start', dest='start', type=str,
@@ -571,6 +626,8 @@ def main():
                               help='Max length to dump')
     parser_boot2.add_argument('--filename', dest='filename', type=str,
                               help='Read from / save to filename')
+    parser_boot2.add_argument('--write', dest='iswrite', action='store_true',
+                              help='Write from filename instead of read')
 
     parser_memread = subparsers.add_parser("memread", help="Read memory")
     parser_memread.add_argument(dest='start', type=str,
@@ -630,7 +687,8 @@ def main():
                 filename = args.filename
             start = getint(args.start)
             length = getint(args.length)
-            st2.preloader(start, length, filename=filename)
+            iswrite = args.iswrite
+            st2.preloader(start, length, filename=filename, iswrite=iswrite)
         elif cmd == "data":
             if args.filename is None:
                 filename = os.path.join("logs", "data")
@@ -638,7 +696,8 @@ def main():
                 filename = args.filename
             start = getint(args.start)
             length = getint(args.length)
-            st2.userdata(start, length, filename=filename)
+            iswrite = args.iswrite
+            st2.userdata(start, length, filename=filename, iswrite=iswrite)
         elif cmd == "boot2":
             if args.filename is None:
                 filename = os.path.join("logs", "boot2")
@@ -646,7 +705,8 @@ def main():
                 filename = args.filename
             start = getint(args.start)
             length = getint(args.length)
-            st2.boot2(start, length, filename=filename)
+            iswrite = args.iswrite
+            st2.boot2(start, length, filename=filename, iswrite=iswrite)
         elif cmd == "memread":
             if args.start is None:
                 print("Option --start is needed")
