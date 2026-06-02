@@ -13,12 +13,13 @@ A fork of MTKClient for the MT8113 chipset. It provides commands for dumping and
 ```shell
 uv venv
 uv sync
-source .venv/bin/activate
 ```
 
 Download the [stage2 payload](https://github.com/ratiz-glitch/old-mtkclient/blob/main/mtkclient/payloads/stage2.bin).
 
 ## Usage
+
+Activate your Python virtual environment with `source .venv/bin/activate`.
 
 Connect your Kobo to your computer with USB and run the following command.
 
