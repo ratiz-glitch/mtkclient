@@ -1,6 +1,6 @@
 # MTKClient
 
-A fork of MTKClient for the MT8113 chipset. It provides commands for dumping and flashing the preloader, U-Boot, and FIT image, with the goal of helping make progress toward loading an unsigned kernel on modern Kobo e-readers. Before proceeding with this README, I recommend reading the documentation made by enthdegree [here](https://github.com/enthdegree/mt8113) to gain more context.
+A fork of MTKClient for the MT8113 chipset. It provides commands for dumping and flashing the preloader, U-Boot, and Linux, with the goal of helping make progress toward loading an unsigned kernel on modern Kobo e-readers. Before proceeding with this README, I recommend reading the documentation made by enthdegree [here](https://github.com/enthdegree/mt8113) to gain more context.
 
 > [!CAUTION]
 > This repository may brick your Kobo. Use at your own risk.
@@ -31,7 +31,7 @@ Connect your Kobo to your computer with USB and run the following command.
 
 Hold the Download pad shorted while briefly shorting the Reset pad. You should see the command report that stage2 was successfully loaded.
 
-Before writing to any region, create a backup of it with `./flash.sh save <region>` where `<region>` is one of `preloader`, `uboot`, or `fit`.
+Before writing to any region, create a backup of it with `./flash.sh save <region>` where `<region>` is one of `preloader`, `uboot`, or `linux`.
 
 Write an image with `./flash.sh write <region> <file>`
 
@@ -47,6 +47,6 @@ You can later restore the original contents with `./flash.sh restore <region>`
 
 Depending on the firmware/software version reported by Kobo (More > Settings > Device information > Sotware version), U-Boot will react differently to an unsigned FIT image.
 
-If the version is 4.45.23697, it seems to enter into a recovery mode and it will reset the device to the version 4.39.22468 in my case.
+If the version is 4.45.23697, the device is automatically rolled back to an older firmware version (4.39.22468 in my case), and if I remember correctly all user data is lost.
 
-If the version is 4.39.22468, U-Boot will complain that it failed to verify the signature and will open a shell. The shell is accessible through UART. It is possible to bypass the signature check by setting the environment variable `verify` to `no` with `setenv verify no`. Then, the unsigned kernel can be booted with the command `boot`. Unfortunately, it is not possible to set permanently the environment variable
+If the version is 4.39.22468, U-Boot will complain that it failed to verify the signature and drops to a shell accessible via UART. It is possible to bypass the signature check by setting the environment variable `verify` to `no` with `setenv verify no`. Then, the unsigned kernel can be booted with the command `boot`. Unfortunately, environment variables are embedded in the U-Boot binary, so this change cannot be made permanent without patching the binary itself. Moreover LK also verifies the signature of the FIT image containing U-Boot.
